@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Video</title>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#17142a; --ink:#f3effa; --mute:#b4accd; --card:#221e3b; --line:#3a3560;
+}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--ink);font-family:Nunito,system-ui,sans-serif;line-height:1.6}
+body{padding:max(20px,env(safe-area-inset-top)) 16px max(32px,env(safe-area-inset-bottom));
+  background:radial-gradient(900px 500px at 50% -10%,#2c2552 0%,transparent 70%),var(--bg);min-height:100vh}
+main{max-width:960px;margin:0 auto;min-height:calc(100vh - 56px);display:flex;align-items:center}
+main>.frame{flex:1}
+h1{font-family:Silkscreen,monospace;font-size:clamp(28px,7vw,56px);line-height:1.1;text-align:center;margin:8px 0 6px;letter-spacing:1px}
+.sub{text-align:center;color:var(--mute);font-size:clamp(15px,3.6vw,18px);margin-bottom:22px}
+
+/* video + pixel frame */
+.frame{position:relative;width:100%;margin:0 auto}
+.frame canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.screen{position:relative;width:100%;aspect-ratio:16/9;background:#0d0b1a;border-radius:6px;overflow:hidden;}
+.screen video{width:100%;height:100%;object-fit:cover;display:block}
+.load{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  background:rgba(13,11,26,.72);font-family:Silkscreen,monospace;font-size:clamp(12px,3vw,16px);transition:opacity .4s}
+.load.off{opacity:0;pointer-events:none}
+.bar{width:min(60%,260px);height:8px;background:#2d2850;border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffb3c7,#ffe3a3,#b5f0cf,#a9d4ff,#d7b8ff)}
+.snd{position:absolute;right:8px;bottom:8px;border:0;border-radius:6px;padding:6px 10px;font:700 13px Nunito;
+  background:rgba(23,20,42,.75);color:var(--ink);}
+
+/* info */
+.grid{display:grid;gap:14px;margin-top:28px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+.card h2{font-family:Silkscreen,monospace;font-size:15px;margin-bottom:10px;font-weight:400}
+.card p{color:var(--mute);font-size:15px}
+.tags{display:flex;flex-wrap:wrap;gap:8px}
+.tags span{padding:4px 10px;border-radius:4px;font-size:14px;font-weight:600;color:#1b1630}
+.links{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:26px}
+.links a{color:var(--ink);text-decoration:none;font-weight:800;padding:10px 18px;border:2px solid var(--line);border-radius:8px;background:var(--card)}
+.links a:hover,.links a:focus-visible{border-color:#a9d4ff;outline:none}
+footer{text-align:center;color:var(--mute);font-size:13px;margin-top:28px}
+</style>
+</head>
+<body>
+<main>
+
+  <div class="frame" id="frame">
+    <canvas id="cv"></canvas>
+    <div class="screen" id="screen">
+      <video id="v" src="video.webm" muted loop playsinline preload="auto"></video>
+      <div class="load" id="load"><span id="pct">Loading 0%</span><div class="bar"><i id="barfill"></i></div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+(function(){
+  var v=document.getElementById('v'), cv=document.getElementById('cv'), ctx=cv.getContext('2d'),
+      frame=document.getElementById('frame'), load=document.getElementById('load'),
+      pct=document.getElementById('pct'), fill=document.getElementById('barfill'),
+      screen=document.getElementById('screen');
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- preload and anti-lag ---------- */
+  var ready=false, prog=0, userPaused=false;
+  var FIRST_NEED=8, REBUF_NEED=5;          // seconds to buffer before playing
+  var need=FIRST_NEED;
+
+  function ahead(){
+    var b=v.buffered, t=v.currentTime;
+    for(var i=0;i<b.length;i++){ if(t>=b.start(i)-0.1 && t<=b.end(i)) return b.end(i)-t; }
+    return 0;
+  }
+  function check(){
+    var dur=isFinite(v.duration)?v.duration:Infinity;
+    var want=Math.min(need, Math.max(1,dur-v.currentTime));
+    var a=ahead();
+    prog=Math.min(1,a/want);
+    if(!ready){
+      pct.textContent='Loading '+Math.round(prog*100)+'%';
+      fill.style.width=(prog*100)+'%';
+      if(a>=want || v.readyState>=4 && a>=want*0.9){
+        ready=true; load.classList.add('off');
+        if(!userPaused) v.play().catch(function(){});
+      }
+    } else if(!v.paused && a<1.2 && v.readyState<4 && !(v.currentTime>dur-1.5)){
+      // buffer almost empty: pause, buffer more, then resume
+      ready=false; need=REBUF_NEED; v.pause(); load.classList.remove('off');
+    }
+  }
+  ['progress','loadedmetadata','canplay','waiting','stalled','timeupdate'].forEach(function(e){v.addEventListener(e,check)});
+  setInterval(check,250);
+  v.load();
+
+  // Autoplay is muted so browsers allow it. If a browser still blocks it,
+  // the first touch/click anywhere starts the video (no buttons needed).
+  function kick(){ if(ready && v.paused) v.play().catch(function(){}); }
+  ['pointerdown','keydown','scroll'].forEach(function(e){addEventListener(e,kick,{passive:true})});
+  v.addEventListener('pause',function(){ if(ready && !document.hidden) setTimeout(kick,300); });
+
+  /* ---------- pixel frame ---------- */
+  var T=10, W=0, H=0, cols=0, rows=0, ring0=[], ring1=[], dpr=1;
+  function layer(k){
+    var a=[], x0=k,y0=k,x1=cols-1-k,y1=rows-1-k, x, y;
+    for(x=x0;x<=x1;x++) a.push([x,y0]);
+    for(y=y0+1;y<=y1;y++) a.push([x1,y]);
+    for(x=x1-1;x>=x0;x--) a.push([x,y1]);
+    for(y=y1-1;y>y0;y--) a.push([x0,y]);
+    return a;
+  }
+  function resize(){
+    dpr=Math.min(window.devicePixelRatio||1,2);
+    var w=frame.clientWidth;
+    cols=Math.max(24,Math.round(w/(w<520?10:14)));
+    T=w/cols;
+    var pad=2*T;
+    screen.style.margin=pad+'px';
+    screen.style.width='calc(100% - '+(2*pad)+'px)';
+    H=frame.clientHeight; W=w;
+    rows=Math.round(H/T);
+    cv.width=W*dpr; cv.height=H*dpr;
+    ring0=layer(0); ring1=layer(1);
+  }
+  new ResizeObserver(resize).observe(frame);
+  resize();
+
+  function hsl(h,s,l,a){return 'hsla('+(h%360)+','+s+'%,'+l+'%,'+a+')'}
+  var head=0, last=performance.now(), fade=0, SPEED=0.07; // laps speed factor
+  function tile(c,fillStyle){
+    ctx.fillStyle=fillStyle;
+    var g=Math.max(1,T*0.1), r=T*0.22, x=c[0]*T+g, y=c[1]*T+g, s=T-2*g;
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(x,y,s,s,r); else ctx.rect(x,y,s,s);
+    ctx.fill();
+  }
+  function frameLoop(now){
+    var dt=Math.min(0.1,(now-last)/1000); last=now;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,W,H);
+    var n=ring0.length, snakeOn=ready&&!reduce;
+    fade+= (ready?1:-1)*dt*1.5; fade=Math.max(0,Math.min(1,fade));
+    if(snakeOn) head=(head+n*SPEED*dt/ (W<520?1.6:1.15))%n;   // one lap is about 14-20 seconds
+    else if(!ready) head=prog*n;
+    var L=Math.max(12,Math.round(n*0.09));
+
+    for(var i=0;i<n;i++){
+      var h=i/n*360;
+      var lit = ready ? 1 : (i/n<prog?1:0);
+      var base = 0.14 + 0.34*lit*(ready?(0.55+0.45*fade):1);
+      tile(ring0[i],hsl(h,70,76,base));
+      if(ring1[i]) tile(ring1[i],hsl(h+20,65,80,base*0.7));
+    }
+    // snake: bright head, fading body, one full rainbow per lap
+    if(ready||prog>0){
+      for(var d=L;d>=0;d--){
+        var idx=((Math.floor(head)-d)%n+n)%n, k=1-d/L, hh=idx/n*360;
+        var a=0.25+0.75*k, li=70+20*k;
+        tile(ring0[idx],hsl(hh,85,li,a));
+        if(ring1[idx]) tile(ring1[idx],hsl(hh,80,li,a*0.8));
+        if(d===0){ ctx.save(); ctx.shadowColor=hsl(hh,90,80,1); ctx.shadowBlur=T*1.6;
+          tile(ring0[idx],hsl(hh,95,90,1)); ctx.restore(); }
+      }
+    }
+    requestAnimationFrame(frameLoop);
+  }
+  requestAnimationFrame(frameLoop);
+})();
+</script>
+</body>
+</html>
